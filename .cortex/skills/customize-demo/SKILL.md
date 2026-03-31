@@ -245,6 +245,7 @@ Apply all changes systematically. For each file, use the Edit tool with exact st
 - Regenerate `sql/02_create_semantic_view.sql` with new table/column mappings
   - **CRITICAL**: When two tables share a column name (e.g., both have CUSTOMER_ID), only define the dimension on ONE table to avoid semantic view duplicate column errors
   - Use `CREATE OR REPLACE AGENT` syntax (not `CREATE CORTEX AGENT`)
+  - **CRITICAL**: The agent's `tool_resources` must include `execution_environment` with `type: "warehouse"` and `warehouse` name. Without this, the agent fails at runtime with error 399504: "The Analyst tool is missing an execution environment."
 - Regenerate `sql/03_create_cortex_agent.sql` with new agent name, semantic view ref, segment context
 - Update `sql/04_deploy_spcs.sql` with new database values:
   - Replace database/schema references in all SQL object names

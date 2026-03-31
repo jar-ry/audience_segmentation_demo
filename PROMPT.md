@@ -113,6 +113,17 @@ Invoke the `/cortex-agent` skill with this request:
   - Query timeout: 60
 ```
 
+**CRITICAL**: The generated agent YAML spec MUST include `execution_environment` under `tool_resources` for each tool. Without it, the agent fails at runtime with error 399504. The `tool_resources` section should look like:
+
+```yaml
+tool_resources:
+  audience_analyst:
+    semantic_view: "DB.SCHEMA.SEMANTIC_VIEW_NAME"
+    execution_environment:
+      type: "warehouse"
+      warehouse: "COMPUTE_WH"
+```
+
 Save the final creation SQL to `sql/03_create_cortex_agent.sql`.
 
 ---
@@ -503,6 +514,7 @@ export interface BreakdownRow { label: string; count: number; }
 7. **Suggested queries format**: Agent returns `{"query": "..."}` objects — extract `.query` property first, then fallback to `.question`, `.text`, then `JSON.stringify()`
 8. **SSE parsing**: Response events can have no aggregate `response` event — implement delta assembly fallback
 9. **Cortex Complete model**: Use `claude-opus-4-6` for AI Complete calls via SQL
+10. **Agent `tool_resources` must include `execution_environment`**: The YAML spec must have `execution_environment: { type: "warehouse", warehouse: "COMPUTE_WH" }` under each tool's `tool_resources` entry. Without this, the agent fails at runtime with error 399504: "The Analyst tool is missing an execution environment. Please specify a warehouse name in its tool_resources, or ensure that you have a default warehouse set."
 
 ### Semantic Views
 10. **Metrics do NOT support `data_type` field** — omit it
