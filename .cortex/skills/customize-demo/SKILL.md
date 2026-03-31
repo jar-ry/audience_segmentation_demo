@@ -126,11 +126,11 @@ Snowflake configuration:
 3. Warehouse: (default: COMPUTE_WH)
 4. Cortex Agent name: (default: AUDIENCE_AGENT)
 5. Semantic View name: (default: AUDIENCE_SEGMENTATION)
-6. Snowflake account identifier: (for SPCS deployment)
-7. Snowflake host: (e.g. abc123.snowflakecomputing.com)
 ```
 
 If the user says "keep defaults" or "same", skip this step.
+
+**NOTE:** Do NOT ask for Snowflake account identifier or host. The SPCS service spec must NOT set `SNOWFLAKE_ACCOUNT` or `SNOWFLAKE_HOST` — SPCS auto-injects these. Setting them explicitly breaks OAuth token validation (error 395092).
 
 ### Step 5: Seed Campaigns & Offers
 
@@ -243,8 +243,15 @@ Apply all changes systematically. For each file, use the Edit tool with exact st
 #### 6h. SQL scripts
 - If seed data was chosen (Step 1), write customized `sql/01_create_mock_data.sql`
 - Regenerate `sql/02_create_semantic_view.sql` with new table/column mappings
+  - **CRITICAL**: When two tables share a column name (e.g., both have CUSTOMER_ID), only define the dimension on ONE table to avoid semantic view duplicate column errors
+  - Use `CREATE OR REPLACE AGENT` syntax (not `CREATE CORTEX AGENT`)
 - Regenerate `sql/03_create_cortex_agent.sql` with new agent name, semantic view ref, segment context
-- Update `sql/04_deploy_spcs.sql` with new account/host/database values
+- Update `sql/04_deploy_spcs.sql` with new database values:
+  - Replace database/schema references in all SQL object names
+  - Replace the image path in the container spec
+  - **CRITICAL: Do NOT add `SNOWFLAKE_ACCOUNT` or `SNOWFLAKE_HOST` to the service spec env vars** — SPCS auto-injects these. Only set `SNOWFLAKE_WAREHOUSE`.
+  - Update the network egress rule `VALUE_LIST` with the user's account host
+  - Add the macOS Docker config workaround comment if not present
 - Update `sql/99_teardown.sql` with new object names
 
 ### Step 7: Verify & Build
@@ -260,6 +267,45 @@ Apply all changes systematically. For each file, use the Edit tool with exact st
 - Segment values and region codes
 - Build status
 - Next steps (run seed SQL if applicable, create semantic view via `/semantic-view`, create agent via `/cortex-agent`, deploy to SPCS)
+
+### Step 8: SPCS Deployment
+
+After the build succeeds, guide the user through deploying to SPCS.
+
+1. **Run the SQL scripts** in order:
+   - `sql/01_create_mock_data.sql` (if seeding data)
+   - `sql/02_create_semantic_view.sql` (or use `/semantic-view` skill)
+   - `sql/03_create_cortex_agent.sql` (or use `/cortex-agent` skill)
+
+2. **Build and push the Docker image**:
+   ```bash
+   cd react-app
+   docker build --platform linux/amd64 --no-cache -t audience-react-app .
+   ```
+   
+   On macOS, set up Docker config to bypass Keychain:
+   ```bash
+   mkdir -p /tmp/docker-spcs && echo '{"credsStore":""}' > /tmp/docker-spcs/config.json
+   DOCKER_CONFIG=/tmp/docker-spcs docker login <registry> -u 0sessiontoken -p "$(snow spcs image-registry token -c <connection> --format json)"
+   ```
+   
+   Tag and push:
+   ```bash
+   docker tag audience-react-app <registry>/<db>/public/react_app_repo/audience-react-app:latest
+   docker push <registry>/<db>/public/react_app_repo/audience-react-app:latest
+   ```
+
+3. **Deploy the service** by running `sql/04_deploy_spcs.sql`
+
+4. **Verify** with `SHOW ENDPOINTS IN SERVICE <db>.PUBLIC.REACT_AUDIENCE_APP` and open the endpoint URL
+
+**CRITICAL SPCS deployment rules:**
+- The server MUST use CommonJS (`require()`), not ESM (`import`). `package.json` must NOT have `"type": "module"`.
+- Use `https.request` (Node built-in) for REST API calls to Snowflake, not `fetch()`.
+- The SDK connection in SPCS must include `accessUrl: 'https://${process.env.SNOWFLAKE_HOST}'` alongside `account`.
+- NEVER set `SNOWFLAKE_ACCOUNT` or `SNOWFLAKE_HOST` in the SPCS service spec env vars. SPCS auto-injects these. Setting them explicitly causes error 395092 ("Client is unauthorized to use Snowpark Container Services OAuth token") because the SPCS OAuth token is only valid for the auto-injected internal host.
+- Only set `SNOWFLAKE_WAREHOUSE` in the service spec env.
+- The Agent REST API path is `/api/v2/databases/<DB>/schemas/<SCHEMA>/agents/<AGENT>:run` (not `/api/v2/cortex/agent:run`).
 
 ## Stopping Points
 

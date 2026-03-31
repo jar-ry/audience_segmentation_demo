@@ -322,6 +322,10 @@ CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION REACT_APP_EGRESS_EAI
   ENABLED = TRUE;
 
 -- 4. Build, tag, and push Docker image
+-- IMPORTANT: On macOS, use DOCKER_CONFIG=/tmp/docker-spcs to bypass Keychain hangs.
+--   mkdir -p /tmp/docker-spcs && echo '{"credsStore":""}' > /tmp/docker-spcs/config.json
+--   DOCKER_CONFIG=/tmp/docker-spcs docker login <registry> -u 0sessiontoken -p "$(snow spcs image-registry token -c <connection> --format json)"
+--
 -- docker build --platform linux/amd64 --no-cache -t audience-react-app .
 -- docker tag audience-react-app <registry>/onedata_audience/public/react_app_repo/audience-react-app:latest
 -- docker push <registry>/onedata_audience/public/react_app_repo/audience-react-app:latest
@@ -329,6 +333,8 @@ CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION REACT_APP_EGRESS_EAI
 -- 5. Create service
 DROP SERVICE IF EXISTS ONEDATA_AUDIENCE.PUBLIC.REACT_AUDIENCE_APP;
 
+-- CRITICAL: Do NOT set SNOWFLAKE_ACCOUNT or SNOWFLAKE_HOST in the env section.
+-- SPCS auto-injects these. Setting them explicitly breaks OAuth token validation.
 CREATE SERVICE ONEDATA_AUDIENCE.PUBLIC.REACT_AUDIENCE_APP
   IN COMPUTE POOL DEMO_POOL_CPU
   EXTERNAL_ACCESS_INTEGRATIONS = (REACT_APP_EGRESS_EAI)
@@ -338,8 +344,6 @@ CREATE SERVICE ONEDATA_AUDIENCE.PUBLIC.REACT_AUDIENCE_APP
       - name: app
         image: /<db>/<schema>/react_app_repo/audience-react-app:latest
         env:
-          SNOWFLAKE_ACCOUNT: <account>
-          SNOWFLAKE_HOST: <host>.snowflakecomputing.com
           SNOWFLAKE_WAREHOUSE: COMPUTE_WH
         resources:
           requests:
@@ -363,6 +367,8 @@ GRANT USAGE ON SERVICE ONEDATA_AUDIENCE.PUBLIC.REACT_AUDIENCE_APP TO ROLE ACCOUN
 - `EXTERNAL_ACCESS_INTEGRATIONS = (REACT_APP_EGRESS_EAI)` — no quotes around the integration name
 - Endpoint URL changes on every `DROP/CREATE SERVICE` — check with `SHOW ENDPOINTS IN SERVICE ...`
 - Platform must be `linux/amd64` for SPCS
+- **NEVER set `SNOWFLAKE_ACCOUNT` or `SNOWFLAKE_HOST` in the service spec env** — SPCS auto-injects these; setting them explicitly causes error 395092 ("Client is unauthorized to use Snowpark Container Services OAuth token")
+- On macOS, Docker login to SPCS registry may hang due to Keychain — use `DOCKER_CONFIG=/tmp/docker-spcs` workaround
 
 ---
 
@@ -485,6 +491,12 @@ export interface BreakdownRow { label: string; count: number; }
 3. **SPCS may rotate the OAuth file** — detect via file hash comparison, reconnect on change
 4. **Always use `--no-cache` for Docker builds** when server code changes
 5. **Port must be 8080** — SPCS expects this in the spec; don't use 3000
+6. **NEVER set `SNOWFLAKE_ACCOUNT` or `SNOWFLAKE_HOST` in the SPCS service spec env vars** — SPCS auto-injects these. Setting them explicitly causes the SDK to connect to the external host instead of the internal SPCS locator, resulting in error 395092: "Client is unauthorized to use Snowpark Container Services OAuth token". The SPCS OAuth token (`ver:3-hint:...` format) is only valid for the auto-injected internal host (e.g., `KJ35885.snowflakecomputing.com`), not the external account host.
+7. **The server MUST use CommonJS (`require()`)**, not ESM (`import`). The `package.json` must NOT have `"type": "module"`. The SPCS container runs Node directly and CommonJS is proven to work reliably.
+8. **Use `https.request` (Node built-in) for REST API calls**, not `fetch()`. `fetch()` can fail in SPCS containers for external calls.
+9. **SDK connection in SPCS must use `accessUrl`**: Pass `accessUrl: 'https://${process.env.SNOWFLAKE_HOST}'` alongside `account` in connection options. This ensures the SDK connects to the correct internal SPCS endpoint.
+10. **Docker on macOS**: Use `DOCKER_CONFIG=/tmp/docker-spcs` with `{"credsStore":""}` to bypass Keychain credential store hangs. Registry password must be the full JSON token object from `snow spcs image-registry token --format json`.
+11. **Agent API path**: Use `/api/v2/databases/<DB>/schemas/<SCHEMA>/agents/<AGENT>:run` (not `/api/v2/cortex/agent:run`)
 
 ### Agent / AI
 6. **Never let AI compute costs** — LLMs hallucinate arithmetic. Pre-compute deterministically with `useMemo`, pass verified numbers to AI for reasoning only
@@ -511,6 +523,9 @@ export interface BreakdownRow { label: string; count: number; }
 21. **`EXTERNAL_ACCESS_INTEGRATIONS = (NAME)` — no quotes** around the integration name
 22. **Endpoint URL changes on every DROP/CREATE SERVICE** — always check with `SHOW ENDPOINTS`
 23. **Docker platform must be `linux/amd64`** for SPCS
+24. **Only set `SNOWFLAKE_WAREHOUSE` in service spec env** — let SPCS auto-inject ACCOUNT and HOST
+25. **Agent DDL**: Use `CREATE OR REPLACE AGENT` (not `CREATE CORTEX AGENT`)
+26. **Semantic view duplicate columns**: When two tables share a column name (e.g., both have CUSTOMER_ID), only define the dimension on one table to avoid conflicts
 
 ---
 

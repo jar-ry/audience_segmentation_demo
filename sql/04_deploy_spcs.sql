@@ -16,20 +16,28 @@ CREATE IMAGE REPOSITORY IF NOT EXISTS ONEDATA_AUDIENCE.PUBLIC.REACT_APP_REPO;
 -- 3. Network egress rule for Cortex Agent REST API
 CREATE OR REPLACE NETWORK RULE ONEDATA_AUDIENCE.PUBLIC.REACT_APP_EGRESS_RULE
   TYPE = HOST_PORT MODE = EGRESS
-  VALUE_LIST = ('sfseapac-jchen-aws1.snowflakecomputing.com:443');
+  VALUE_LIST = ('<account>.snowflakecomputing.com:443');
 
 CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION REACT_APP_EGRESS_EAI
   ALLOWED_NETWORK_RULES = (ONEDATA_AUDIENCE.PUBLIC.REACT_APP_EGRESS_RULE)
   ENABLED = TRUE;
 
 -- 4. Docker build & push (run from react-app/ directory)
+-- IMPORTANT: On macOS, use DOCKER_CONFIG=/tmp/docker-spcs to bypass Keychain hangs.
+--   mkdir -p /tmp/docker-spcs && echo '{"credsStore":""}' > /tmp/docker-spcs/config.json
+--   DOCKER_CONFIG=/tmp/docker-spcs docker login <registry> -u 0sessiontoken -p "$(snow spcs image-registry token -c <connection> --format json)"
+--
 -- docker build --platform linux/amd64 --no-cache -t audience-react-app .
--- docker tag audience-react-app sfseapac-jchen-aws1.registry.snowflakecomputing.com/onedata_audience/public/react_app_repo/audience-react-app:latest
--- docker push sfseapac-jchen-aws1.registry.snowflakecomputing.com/onedata_audience/public/react_app_repo/audience-react-app:latest
+-- docker tag audience-react-app <registry>/<db>/public/react_app_repo/audience-react-app:latest
+-- docker push <registry>/<db>/public/react_app_repo/audience-react-app:latest
 
 -- 5. Create service
 DROP SERVICE IF EXISTS ONEDATA_AUDIENCE.PUBLIC.REACT_AUDIENCE_APP;
 
+-- CRITICAL: Do NOT set SNOWFLAKE_ACCOUNT or SNOWFLAKE_HOST in the env section.
+-- SPCS auto-injects these. Setting them explicitly causes the OAuth token to be
+-- sent to the wrong host, resulting in error 395092:
+--   "Client is unauthorized to use Snowpark Container Services OAuth token"
 CREATE SERVICE ONEDATA_AUDIENCE.PUBLIC.REACT_AUDIENCE_APP
   IN COMPUTE POOL DEMO_POOL_CPU
   EXTERNAL_ACCESS_INTEGRATIONS = (REACT_APP_EGRESS_EAI)
@@ -37,10 +45,8 @@ CREATE SERVICE ONEDATA_AUDIENCE.PUBLIC.REACT_AUDIENCE_APP
   spec:
     containers:
       - name: app
-        image: /onedata_audience/public/react_app_repo/audience-react-app:latest
+        image: /<db>/<schema>/react_app_repo/audience-react-app:latest
         env:
-          SNOWFLAKE_ACCOUNT: SFSEAPAC-JCHEN_AWS1
-          SNOWFLAKE_HOST: sfseapac-jchen-aws1.snowflakecomputing.com
           SNOWFLAKE_WAREHOUSE: COMPUTE_WH
         resources:
           requests:

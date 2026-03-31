@@ -1,345 +1,412 @@
-import express from 'express';
-import cors from 'cors';
-import snowflake from 'snowflake-sdk';
-import { readFileSync, existsSync } from 'fs';
-import { createHash } from 'crypto';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const express = require('express');
+const snowflake = require('snowflake-sdk');
+const path = require('path');
+const fs = require('fs');
+const https = require('https');
 
 const app = express();
-app.use(cors());
-app.use(express.json({ limit: '5mb' }));
+app.use(express.json({ limit: '10mb' }));
 
-// ── Config ──────────────────────────────────────────────────
 const PORT = process.env.PORT || 8080;
-const OAUTH_TOKEN_PATH = '/snowflake/session/token';
-const IS_SPCS = existsSync(OAUTH_TOKEN_PATH);
 
-const SF_ACCOUNT = process.env.SNOWFLAKE_ACCOUNT || '';
-const SF_HOST = process.env.SNOWFLAKE_HOST || '';
-const SF_WAREHOUSE = process.env.SNOWFLAKE_WAREHOUSE || 'COMPUTE_WH';
-const SF_DATABASE = 'ONEDATA_AUDIENCE';
-const SF_SCHEMA = 'PUBLIC';
-
-// ── Token & Connection Management ───────────────────────────
 let connection = null;
-let lastOAuthHash = null;
-let sessionToken = null;
-let sessionTokenTime = 0;
-const SESSION_TTL_MS = 55 * 60 * 1000; // 55 minutes
+let cachedSessionToken = null;
+let sessionTokenTimestamp = 0;
+const SESSION_TOKEN_TTL_MS = 55 * 60 * 1000;
+let lastOAuthTokenHash = null;
 
-function simpleHash(str) {
-  return createHash('md5').update(str).digest('hex');
-}
-
-function readOAuthToken() {
-  if (!IS_SPCS) return null;
+function readToken() {
   try {
-    return readFileSync(OAUTH_TOKEN_PATH, 'utf-8').trim();
+    return fs.readFileSync('/snowflake/session/token', 'utf-8').trim();
   } catch {
     return null;
   }
 }
 
+function simpleHash(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) {
+    h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+  }
+  return h;
+}
+
 function getConnection() {
   return new Promise((resolve, reject) => {
-    if (!IS_SPCS) {
-      reject(new Error('Not running in SPCS — no OAuth token available'));
-      return;
-    }
-
-    const oauthToken = readOAuthToken();
-    if (!oauthToken) {
-      reject(new Error('Could not read OAuth token'));
-      return;
-    }
-
-    const currentHash = simpleHash(oauthToken);
-
-    // If OAuth file changed, destroy old connection
-    if (connection && lastOAuthHash && currentHash !== lastOAuthHash) {
-      console.log('OAuth token file changed — reconnecting');
-      try { connection.destroy(() => {}); } catch {}
+    const currentToken = readToken();
+    const currentHash = currentToken ? simpleHash(currentToken) : null;
+    const oauthRotated = currentHash && lastOAuthTokenHash && currentHash !== lastOAuthTokenHash;
+    if (oauthRotated) {
+      console.log('[AUTH] OAuth token rotated by SPCS — reconnecting SDK and clearing session token');
+      if (connection) { try { connection.destroy(() => {}); } catch {} }
       connection = null;
-      sessionToken = null;
-      sessionTokenTime = 0;
+      cachedSessionToken = null;
+      sessionTokenTimestamp = 0;
+    }
+    if (currentHash) lastOAuthTokenHash = currentHash;
+
+    if (connection && connection.isUp()) {
+      return resolve(connection);
     }
 
-    if (connection) {
-      resolve(connection);
-      return;
-    }
+    const token = readToken();
+    const isSpcs = !!token;
+    const connOpts = isSpcs
+      ? {
+          accessUrl: `https://${process.env.SNOWFLAKE_HOST}`,
+          account: process.env.SNOWFLAKE_ACCOUNT,
+          authenticator: 'OAUTH',
+          token,
+          warehouse: process.env.SNOWFLAKE_WAREHOUSE || 'COMPUTE_WH',
+          database: 'ONEDATA_AUDIENCE',
+          schema: 'PUBLIC',
+        }
+      : {
+          account: process.env.SNOWFLAKE_ACCOUNT,
+          username: process.env.SNOWFLAKE_USER,
+          password: process.env.SNOWFLAKE_PASSWORD,
+          warehouse: process.env.SNOWFLAKE_WAREHOUSE || 'COMPUTE_WH',
+          database: 'ONEDATA_AUDIENCE',
+          schema: 'PUBLIC',
+          role: process.env.SNOWFLAKE_ROLE || 'ACCOUNTADMIN',
+        };
 
-    lastOAuthHash = currentHash;
-
-    const conn = snowflake.createConnection({
-      account: SF_ACCOUNT,
-      authenticator: 'OAUTH',
-      token: oauthToken,
-      warehouse: SF_WAREHOUSE,
-      database: SF_DATABASE,
-      schema: SF_SCHEMA,
-    });
-
-    conn.connect((err) => {
-      if (err) {
-        console.error('Snowflake connection error:', err.message);
-        reject(err);
-      } else {
-        console.log('Snowflake connection established');
-        connection = conn;
-        resolve(conn);
-      }
+    const conn = snowflake.createConnection(connOpts);
+    conn.connect((err, c) => {
+      if (err) return reject(err);
+      connection = c;
+      resolve(c);
     });
   });
 }
 
-async function exchangeOAuthForSession(oauthToken) {
-  const url = `https://${SF_HOST}/session/v1/login-request?warehouse=${SF_WAREHOUSE}&databaseName=${SF_DATABASE}&schemaName=${SF_SCHEMA}`;
-
-  const body = {
-    data: {
-      AUTHENTICATOR: 'OAUTH',
-      TOKEN: oauthToken,
-      LOGIN_NAME: '',
-      ACCOUNT_NAME: SF_ACCOUNT,
-    },
-  };
-
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-  if (!resp.ok) {
-    throw new Error(`Login-request failed: ${resp.status} ${await resp.text()}`);
-  }
-
-  const json = await resp.json();
-  if (!json.data?.token) {
-    throw new Error('No session token in login-request response');
-  }
-
-  return json.data.token;
-}
-
-async function getSessionToken(forceRefresh = false) {
-  const now = Date.now();
-
-  if (!forceRefresh && sessionToken && (now - sessionTokenTime) < SESSION_TTL_MS) {
-    return sessionToken;
-  }
-
-  const oauthToken = readOAuthToken();
-  if (!oauthToken) throw new Error('Could not read OAuth token');
-
-  sessionToken = await exchangeOAuthForSession(oauthToken);
-  sessionTokenTime = Date.now();
-  console.log('Successfully exchanged OAuth token for session token');
-  return sessionToken;
-}
-
-// ── SQL Execution ───────────────────────────────────────────
-function executeSql(sql) {
+function executeSQL(sql) {
   return new Promise(async (resolve, reject) => {
     try {
       const conn = await getConnection();
       conn.execute({
         sqlText: sql,
-        complete: (err, _stmt, rows) => {
-          if (err) reject(err);
-          else resolve(rows || []);
+        complete: (err, stmt, rows) => {
+          if (err) return reject(err);
+          resolve(rows || []);
         },
       });
-    } catch (err) {
-      reject(err);
+    } catch (e) {
+      reject(e);
     }
   });
 }
 
-// ── Cortex Agent REST API ───────────────────────────────────
-async function callAgentAPI(query, _retry = 0) {
-  const token = await getSessionToken();
+function exchangeOAuthForSession() {
+  return new Promise((resolve, reject) => {
+    const oauthToken = readToken();
+    const host = process.env.SNOWFLAKE_HOST;
+    const account = process.env.SNOWFLAKE_ACCOUNT;
 
-  const url = `https://${SF_HOST}/api/v2/cortex/agent:run`;
-  const body = {
-    agent_name: `${SF_DATABASE}.${SF_SCHEMA}.AUDIENCE_AGENT`,
-    query: query,
-    response_instruction: 'Be concise and data-driven. Format numbers with commas.',
-  };
+    if (!oauthToken || !host) {
+      return reject(new Error('No OAuth token or host'));
+    }
 
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Snowflake Token="${token}"`,
-      'X-Snowflake-Authorization-Token-Type': 'KEYPAIR_JWT',
-    },
-    body: JSON.stringify(body),
-  });
+    const payload = JSON.stringify({
+      data: {
+        ACCOUNT_NAME: account,
+        LOGIN_NAME: '',
+        AUTHENTICATOR: 'OAUTH',
+        TOKEN: oauthToken,
+        CLIENT_APP_ID: 'react-audience-app',
+        CLIENT_APP_VERSION: '1.0',
+      },
+    });
 
-  if ((resp.status === 401 || resp.status === 403) && _retry < 2) {
-    console.log(`Agent API ${resp.status} — refreshing token (retry ${_retry + 1})`);
-    sessionToken = null;
-    sessionTokenTime = 0;
-    return callAgentAPI(query, _retry + 1);
-  }
+    const options = {
+      hostname: host,
+      port: 443,
+      path: '/session/v1/login-request',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'react-audience-app/1.0',
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    };
 
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`Agent API error ${resp.status}: ${text}`);
-  }
-
-  // Parse SSE response
-  const text = await resp.text();
-  const lines = text.split('\n');
-
-  let responseText = '';
-  let sql = '';
-  let data = [];
-  let suggested = [];
-  const deltas = [];
-
-  for (const line of lines) {
-    if (!line.startsWith('data: ')) continue;
-    const payload = line.slice(6).trim();
-    if (!payload || payload === '[DONE]') continue;
-
-    try {
-      const evt = JSON.parse(payload);
-
-      if (evt.type === 'response.text.delta') {
-        deltas.push(evt.data?.text || '');
-      }
-
-      if (evt.type === 'response') {
-        responseText = evt.data?.text || '';
-      }
-
-      if (evt.type === 'response.tool_result') {
-        const content = evt.data?.content || [];
-        for (const c of content) {
-          if (c.type === 'tool_results') {
-            sql = c.sql || sql;
-            data = c.data || data;
+    const req = https.request(options, (res) => {
+      let body = '';
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(body);
+          if (parsed.success && parsed.data && parsed.data.token) {
+            cachedSessionToken = parsed.data.token;
+            sessionTokenTimestamp = Date.now();
+            console.log('Successfully exchanged OAuth token for session token');
+            resolve(cachedSessionToken);
+          } else {
+            console.error('Login-request response:', JSON.stringify(parsed).slice(0, 500));
+            reject(new Error(`Token exchange failed: ${parsed.message || 'unknown error'}`));
           }
-          if (c.type === 'sql') {
-            sql = c.statement || c.sql || sql;
-          }
-          if (c.type === 'results' && Array.isArray(c.data)) {
-            data = c.data;
-          }
+        } catch (e) {
+          reject(new Error(`Failed to parse login response: ${body.slice(0, 300)}`));
         }
-        // Also check top level
-        if (evt.data?.sql) sql = evt.data.sql;
-        if (evt.data?.data) data = evt.data.data;
-      }
+      });
+    });
 
-      if (evt.type === 'response.suggested_queries') {
-        const queries = evt.data?.queries || evt.data?.suggested_queries || [];
-        suggested = queries.map((q) => {
-          if (typeof q === 'string') return q;
-          return q.query || q.question || q.text || JSON.stringify(q);
-        });
-      }
-    } catch {}
-  }
-
-  // Fallback: assemble deltas if no aggregate response
-  if (!responseText && deltas.length > 0) {
-    responseText = deltas.join('');
-  }
-
-  return { text: responseText, sql, data, suggested };
+    req.on('error', reject);
+    req.setTimeout(30000, () => {
+      req.destroy();
+      reject(new Error('Token exchange timed out'));
+    });
+    req.write(payload);
+    req.end();
+  });
 }
 
-// ── Routes ──────────────────────────────────────────────────
+async function getSessionToken(forceRefresh = false) {
+  const age = Date.now() - sessionTokenTimestamp;
+  const expired = age > SESSION_TOKEN_TTL_MS;
+  if (cachedSessionToken && !forceRefresh && !expired) return cachedSessionToken;
+  if (expired && cachedSessionToken) console.log(`[AUTH] Session token expired (age: ${Math.round(age / 60000)}m, TTL: ${Math.round(SESSION_TOKEN_TTL_MS / 60000)}m) — refreshing`);
+  cachedSessionToken = null;
+  sessionTokenTimestamp = 0;
+  return exchangeOAuthForSession();
+}
 
-// Execute SQL
+function callAgentAPI(query, _retry = 0) {
+  return new Promise(async (resolve, reject) => {
+    const host = process.env.SNOWFLAKE_HOST;
+    if (!host) {
+      return reject(new Error('SNOWFLAKE_HOST not available'));
+    }
+
+    let sessionToken;
+    try {
+      sessionToken = await getSessionToken(_retry > 0);
+    } catch (e) {
+      console.error('Failed to get session token:', e.message);
+      return reject(new Error('Authentication failed: ' + e.message));
+    }
+
+    const payload = JSON.stringify({
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: query }] },
+      ],
+    });
+
+    const options = {
+      hostname: host,
+      port: 443,
+      path: '/api/v2/databases/ONEDATA_AUDIENCE/schemas/PUBLIC/agents/AUDIENCE_AGENT:run',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Snowflake Token="${sessionToken}"`,
+        'User-Agent': 'react-audience-app/1.0',
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    };
+
+    const req = https.request(options, (res) => {
+      let body = '';
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('end', () => {
+        if (res.statusCode === 401 || res.statusCode === 403) {
+          cachedSessionToken = null;
+          sessionTokenTimestamp = 0;
+          if (_retry < 2) {
+            return callAgentAPI(query, _retry + 1).then(resolve, reject);
+          }
+          return reject(new Error('SESSION_EXPIRED'));
+        }
+        if (res.statusCode !== 200) {
+          console.error('[AGENT] API error:', res.statusCode, body.slice(0, 500));
+          return reject(new Error(`Agent API error ${res.statusCode}: ${body.slice(0, 500)}`));
+        }
+        try {
+          const events = parseSSE(body);
+          resolve(events);
+        } catch (e) {
+          console.error('[AGENT] SSE parse error:', e.message);
+          reject(new Error(`Failed to parse agent SSE: ${e.message}`));
+        }
+      });
+    });
+
+    req.on('error', (e) => {
+      console.error('[AGENT] Request error:', e.message);
+      reject(e);
+    });
+    req.setTimeout(120000, () => {
+      console.error('[AGENT] Request timed out after 120s');
+      req.destroy();
+      reject(new Error('Agent API request timed out'));
+    });
+    req.write(payload);
+    req.end();
+  });
+}
+
+function parseSSE(raw) {
+  const events = [];
+  const blocks = raw.split('\n\n');
+  for (const block of blocks) {
+    const trimmed = block.trim();
+    if (!trimmed) continue;
+    const lines = trimmed.split('\n');
+    let eventType = '';
+    let dataStr = '';
+    for (const line of lines) {
+      if (line.startsWith('event: ')) {
+        eventType = line.slice(7).trim();
+      } else if (line.startsWith('data: ')) {
+        dataStr += line.slice(6);
+      } else if (line.startsWith('data:')) {
+        dataStr += line.slice(5);
+      }
+    }
+    if (eventType && dataStr) {
+      try {
+        events.push({ event: eventType, data: JSON.parse(dataStr) });
+      } catch {
+        events.push({ event: eventType, data: dataStr });
+      }
+    }
+  }
+  return events;
+}
+
+function parseAgentResponse(responseContent) {
+  const textParts = [];
+  let sql = '';
+  let data = null;
+  let suggested = [];
+
+  let contentItems = [];
+  if (Array.isArray(responseContent)) {
+    for (const event of responseContent) {
+      if (event.event === 'response') {
+        contentItems = (event.data && event.data.content) || [];
+        break;
+      }
+    }
+    if (contentItems.length === 0) {
+      for (const event of responseContent) {
+        if (event.event === 'response.text.delta' && event.data && event.data.delta) {
+          textParts.push(event.data.delta);
+        } else if (event.event === 'response.tool_result' && event.data) {
+          contentItems.push({ type: 'tool_result', tool_result: event.data });
+        } else if (event.event === 'response.suggested_queries' && event.data) {
+          contentItems.push({ type: 'suggested_queries', suggested_queries: event.data.suggested_queries || [] });
+        }
+      }
+    }
+  } else if (responseContent && responseContent.content) {
+    contentItems = responseContent.content;
+  }
+
+  for (const item of contentItems) {
+    const itemType = item.type || '';
+    if (itemType === 'text') {
+      textParts.push(item.text || '');
+    } else if (itemType === 'tool_result') {
+      const toolResult = item.tool_result || {};
+      for (const result of (toolResult.content || [])) {
+        if (result.type === 'json') {
+          const jsonData = result.json || {};
+          sql = jsonData.sql || sql;
+          const rs = jsonData.result_set || {};
+          if (rs.data && rs.data.length > 0) {
+            const cols = ((rs.resultSetMetaData || {}).rowType || []).map(c => c.name);
+            data = rs.data.map(row => {
+              const obj = {};
+              cols.forEach((col, i) => { obj[col] = row[i]; });
+              return obj;
+            });
+          }
+        }
+      }
+    } else if (itemType === 'suggested_queries') {
+      suggested = (item.suggested_queries || []).map(s =>
+        typeof s === 'string' ? s : s.query || s.question || s.text || JSON.stringify(s)
+      );
+    }
+  }
+
+  return {
+    text: textParts.join('\n\n') || 'No response received.',
+    sql: sql || undefined,
+    data: data || undefined,
+    suggested: suggested.length > 0 ? suggested : undefined,
+  };
+}
+
 app.post('/api/sql', async (req, res) => {
   try {
     const { sql } = req.body;
-    if (!sql) return res.status(400).json({ error: 'Missing sql' });
-    const rows = await executeSql(sql);
+    const rows = await executeSQL(sql);
     res.json({ rows });
-  } catch (err) {
-    console.error('SQL error:', err.message);
-    res.status(500).json({ error: err.message });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-// Call Cortex Agent
 app.post('/api/agent-via-sql', async (req, res) => {
   try {
     const { query } = req.body;
-    if (!query) return res.status(400).json({ error: 'Missing query' });
-    const result = await callAgentAPI(query);
-    res.json(result);
-  } catch (err) {
-    console.error('Agent error:', err.message);
-    res.status(500).json({ error: err.message });
+    const rawResponse = await callAgentAPI(query);
+    const parsed = parseAgentResponse(rawResponse);
+    res.json(parsed);
+  } catch (e) {
+    console.error('[ROUTE] Agent call error:', e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 
-// Cortex Complete
 app.post('/api/ai-complete', async (req, res) => {
   try {
     const { prompt } = req.body;
-    if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
-
-    // Escape single quotes in prompt for SQL
     const escaped = prompt.replace(/'/g, "''");
-    const sql = `SELECT SNOWFLAKE.CORTEX.COMPLETE('claude-4-sonnet', '${escaped}') AS response`;
-    const rows = await executeSql(sql);
-    const text = rows?.[0]?.RESPONSE || rows?.[0]?.response || '';
-    res.json({ text });
-  } catch (err) {
-    console.error('AI Complete error:', err.message);
-    res.status(500).json({ error: err.message });
+    const rows = await executeSQL(
+      `SELECT SNOWFLAKE.CORTEX.COMPLETE('claude-4-sonnet', '${escaped}') AS resp`
+    );
+    res.json({ text: rows[0]?.RESP || '' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
 // Health check
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', spcs: IS_SPCS, timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', spcs: !!readToken(), timestamp: new Date().toISOString() });
 });
 
-// ── Static file serving (production) ────────────────────────
-const distPath = path.join(__dirname, '..', 'dist');
-if (existsSync(distPath)) {
-  app.use(express.static(distPath));
-  app.get('*', (_req, res) => {
-    res.sendFile(path.join(distPath, 'index.html'));
-  });
-}
+app.use(express.static(path.join(__dirname, '..', 'dist')));
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'dist', 'index.html'));
+});
 
-// ── Start ───────────────────────────────────────────────────
-app.listen(PORT, async () => {
+app.listen(PORT, '0.0.0.0', async () => {
   console.log(`Server running on port ${PORT}`);
-
-  if (IS_SPCS) {
-    try {
-      await getConnection();
+  try {
+    await getConnection();
+    console.log('Snowflake connection established');
+    if (readToken()) {
       await getSessionToken();
       console.log('Session token obtained for REST API calls');
-    } catch (err) {
-      console.error('Initial setup error:', err.message);
     }
+  } catch (e) {
+    console.error('Startup auth error:', e.message);
+  }
 
-    // Background token refresh every 5 minutes
+  if (readToken()) {
     setInterval(async () => {
       try {
-        const age = Date.now() - sessionTokenTime;
-        if (age > SESSION_TTL_MS * 0.8) {
+        const age = Date.now() - sessionTokenTimestamp;
+        if (age > SESSION_TOKEN_TTL_MS * 0.8) {
+          console.log('[AUTH] Proactive token refresh (background)');
           await getSessionToken(true);
-          console.log('Proactive token refresh completed');
         }
-      } catch (err) {
-        console.error('Background refresh error:', err.message);
+      } catch (e) {
+        console.error('[AUTH] Background refresh failed:', e.message);
       }
     }, 5 * 60 * 1000);
     console.log('Background token refresh scheduled every 5 minutes');
