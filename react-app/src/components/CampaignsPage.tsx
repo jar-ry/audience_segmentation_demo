@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Campaign } from '../types';
 import { aiComplete } from '../hooks/api';
+import { formatMarkdown } from './FormatMarkdown';
 
 interface Props {
   campaigns: Campaign[];
@@ -212,15 +213,7 @@ Focus on: performance assessment, optimization opportunities, and next steps. Be
             </div>
           ) : (
             <div className="insight-summary">
-              <ul>
-                {aiInsight
-                  .split('\n')
-                  .map((l) => l.replace(/^[-*]\s*/, '').trim())
-                  .filter((l) => l.length > 0)
-                  .map((line, i) => (
-                    <li key={i}>{line}</li>
-                  ))}
-              </ul>
+              {formatMarkdown(aiInsight)}
             </div>
           )}
         </div>

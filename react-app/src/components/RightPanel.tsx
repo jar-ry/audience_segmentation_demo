@@ -1,5 +1,6 @@
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import type { BreakdownRow } from '../types';
+import { formatMarkdown } from './FormatMarkdown';
 
 interface Props {
   stateData: BreakdownRow[];
@@ -22,14 +23,6 @@ export default function RightPanel({ stateData, ageData, execSummary, loading, a
     );
   }
 
-  const parseSummary = (text: string): string[] => {
-    if (!text) return [];
-    return text
-      .split('\n')
-      .map((line) => line.replace(/^[-*]\s*/, '').trim())
-      .filter((line) => line.length > 0);
-  };
-
   return (
     <div className="right-panel">
       {/* AI Summary */}
@@ -43,11 +36,7 @@ export default function RightPanel({ stateData, ageData, execSummary, loading, a
           </div>
         ) : (
           <div className="insight-summary">
-            <ul>
-              {parseSummary(execSummary).map((line, i) => (
-                <li key={i}>{line}</li>
-              ))}
-            </ul>
+            {formatMarkdown(execSummary)}
           </div>
         )}
       </div>

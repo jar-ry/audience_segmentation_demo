@@ -41,19 +41,15 @@ export default function Sidebar({
         </div>
       )}
 
-      {/* Retailer */}
+      {/* Abandoned Cart */}
       <div className="filter-group">
-        <label>Retailer</label>
-        <div className="pill-group">
-          {['All', 'Kmart', 'Bunnings'].map((r) => (
-            <button
-              key={r}
-              className={`pill ${filters.retailer === r ? 'active' : ''}`}
-              onClick={() => update({ retailer: r })}
-            >
-              {r}
-            </button>
-          ))}
+        <label>Cart Status</label>
+        <div className="toggle-row">
+          <span>Abandoned Cart Only</span>
+          <button
+            className={`toggle ${filters.abandonedCart ? 'on' : ''}`}
+            onClick={() => update({ abandonedCart: !filters.abandonedCart })}
+          />
         </div>
       </div>
 
@@ -171,6 +167,7 @@ export default function Sidebar({
             hasPhone: false,
             minSpend: 0,
             recencyDays: 730,
+            abandonedCart: false,
           })
         }
       >

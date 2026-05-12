@@ -46,9 +46,7 @@ export function buildWhereClause(
   const conditions: string[] = [];
 
   // Retailer
-  if (filters.retailer !== 'All') {
-    conditions.push(`c.RETAILER = '${filters.retailer}'`);
-  }
+
 
   // Age range
   if (filters.ageRange[0] > 1 || filters.ageRange[1] < 100) {
@@ -69,6 +67,11 @@ export function buildWhereClause(
     conditions.push(`c.HAS_PHONE = TRUE`);
   }
 
+  // Abandoned cart
+  if (filters.abandonedCart) {
+    conditions.push(`c.ABANDONED_CART = TRUE`);
+  }
+
   const customerWhere = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   // Build full query — join transactions if needed for spend/recency
@@ -78,9 +81,6 @@ export function buildWhereClause(
 
   if (needTxnJoin) {
     const txnConditions: string[] = [];
-    if (filters.retailer !== 'All') {
-      txnConditions.push(`t.RETAILER = '${filters.retailer}'`);
-    }
     if (filters.recencyDays < 730) {
       txnConditions.push(
         `t.TRANSACTION_DATE >= DATEADD('day', -${filters.recencyDays}, CURRENT_DATE())`
@@ -93,14 +93,14 @@ export function buildWhereClause(
     fullQuery = `
       SELECT COUNT(*) AS cnt FROM (
         SELECT c.CUSTOMER_ID
-        FROM ONEDATA_AUDIENCE.PUBLIC.CUSTOMERS c
-        JOIN ONEDATA_AUDIENCE.PUBLIC.TRANSACTIONS t ON c.CUSTOMER_ID = t.CUSTOMER_ID ${txnWhere}
+        FROM OFFICEWORKS_AUDIENCE.PUBLIC.CUSTOMERS c
+        JOIN OFFICEWORKS_AUDIENCE.PUBLIC.TRANSACTIONS t ON c.CUSTOMER_ID = t.CUSTOMER_ID ${txnWhere}
         ${customerWhere ? customerWhere.replace('WHERE', 'WHERE') + '' : ''}
         GROUP BY c.CUSTOMER_ID
         ${havingClause}
       )`;
   } else {
-    fullQuery = `SELECT COUNT(*) AS cnt FROM ONEDATA_AUDIENCE.PUBLIC.CUSTOMERS c ${customerWhere}`;
+    fullQuery = `SELECT COUNT(*) AS cnt FROM OFFICEWORKS_AUDIENCE.PUBLIC.CUSTOMERS c ${customerWhere}`;
   }
 
   return { customerWhere, fullQuery };
@@ -127,9 +127,6 @@ export function buildBreakdownQuery(
 
     if (needTxnJoin) {
       const txnConditions: string[] = [];
-      if (filters.retailer !== 'All') {
-        txnConditions.push(`t.RETAILER = '${filters.retailer}'`);
-      }
       if (filters.recencyDays < 730) {
         txnConditions.push(
           `t.TRANSACTION_DATE >= DATEADD('day', -${filters.recencyDays}, CURRENT_DATE())`
@@ -142,8 +139,8 @@ export function buildBreakdownQuery(
       return `
         SELECT label, COUNT(*) AS count FROM (
           SELECT c.CUSTOMER_ID, ${ageSelect}
-          FROM ONEDATA_AUDIENCE.PUBLIC.CUSTOMERS c
-          JOIN ONEDATA_AUDIENCE.PUBLIC.TRANSACTIONS t ON c.CUSTOMER_ID = t.CUSTOMER_ID ${txnWhere}
+          FROM OFFICEWORKS_AUDIENCE.PUBLIC.CUSTOMERS c
+          JOIN OFFICEWORKS_AUDIENCE.PUBLIC.TRANSACTIONS t ON c.CUSTOMER_ID = t.CUSTOMER_ID ${txnWhere}
           ${customerWhere}
           GROUP BY c.CUSTOMER_ID, c.AGE
           ${havingClause}
@@ -152,7 +149,7 @@ export function buildBreakdownQuery(
 
     return `
       SELECT ${ageSelect}, COUNT(*) AS count
-      FROM ONEDATA_AUDIENCE.PUBLIC.CUSTOMERS c
+      FROM OFFICEWORKS_AUDIENCE.PUBLIC.CUSTOMERS c
       ${customerWhere}
       GROUP BY label ORDER BY label`;
   }
@@ -160,9 +157,6 @@ export function buildBreakdownQuery(
   // STATE_CODE groupBy
   if (needTxnJoin) {
     const txnConditions: string[] = [];
-    if (filters.retailer !== 'All') {
-      txnConditions.push(`t.RETAILER = '${filters.retailer}'`);
-    }
     if (filters.recencyDays < 730) {
       txnConditions.push(
         `t.TRANSACTION_DATE >= DATEADD('day', -${filters.recencyDays}, CURRENT_DATE())`
@@ -175,8 +169,8 @@ export function buildBreakdownQuery(
     return `
       SELECT label, COUNT(*) AS count FROM (
         SELECT c.CUSTOMER_ID, c.STATE_CODE AS label
-        FROM ONEDATA_AUDIENCE.PUBLIC.CUSTOMERS c
-        JOIN ONEDATA_AUDIENCE.PUBLIC.TRANSACTIONS t ON c.CUSTOMER_ID = t.CUSTOMER_ID ${txnWhere}
+        FROM OFFICEWORKS_AUDIENCE.PUBLIC.CUSTOMERS c
+        JOIN OFFICEWORKS_AUDIENCE.PUBLIC.TRANSACTIONS t ON c.CUSTOMER_ID = t.CUSTOMER_ID ${txnWhere}
         ${customerWhere}
         GROUP BY c.CUSTOMER_ID, c.STATE_CODE
         ${havingClause}
@@ -185,7 +179,7 @@ export function buildBreakdownQuery(
 
   return `
     SELECT c.STATE_CODE AS label, COUNT(*) AS count
-    FROM ONEDATA_AUDIENCE.PUBLIC.CUSTOMERS c
+    FROM OFFICEWORKS_AUDIENCE.PUBLIC.CUSTOMERS c
     ${customerWhere}
     GROUP BY c.STATE_CODE ORDER BY count DESC`;
 }
@@ -197,15 +191,16 @@ export async function extractFiltersFromSQL(sql: string): Promise<Partial<Filter
 SQL: ${sql}
 
 Return ONLY valid JSON with these optional fields:
-- retailer: "Kmart" or "Bunnings" or "All"
+- retailer: "Officeworks" or "All"
 - ageRange: [min, max] (integers)
 - states: ["NSW", "VIC", ...] (state codes)
 - hasEmail: true/false
 - hasPhone: true/false
 - minSpend: number
 - recencyDays: number
+- abandonedCart: true/false
 
-Example: {"retailer":"Kmart","ageRange":[30,60],"states":["NSW","VIC"]}
+Example: {"retailer":"Officeworks","ageRange":[30,60],"states":["NSW","VIC"],"abandonedCart":true}
 
 Return ONLY the JSON object, nothing else.`;
 

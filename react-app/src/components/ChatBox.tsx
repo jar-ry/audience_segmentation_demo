@@ -1,123 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
 import type { ChatMessage } from '../types';
 import { callAgent } from '../hooks/api';
+import { formatMarkdown } from './FormatMarkdown';
 
 interface Props {
   filterContext: string;
   onAgentSQL?: (sql: string) => void;
-}
-
-function formatContent(text: string): JSX.Element[] {
-  const lines = text.split('\n');
-  const elements: JSX.Element[] = [];
-  let inCodeBlock = false;
-  let codeLines: string[] = [];
-  let listItems: { text: string; ordered: boolean; idx: number }[] = [];
-
-  const flushList = () => {
-    if (listItems.length === 0) return;
-    const ordered = listItems[0].ordered;
-    const Tag = ordered ? 'ol' : 'ul';
-    elements.push(
-      <Tag key={`list-${elements.length}`}>
-        {listItems.map((li, i) => (
-          <li key={i}>{inlineFormat(li.text)}</li>
-        ))}
-      </Tag>
-    );
-    listItems = [];
-  };
-
-  const inlineFormat = (s: string): JSX.Element | string => {
-    // Bold
-    const parts = s.split(/\*\*(.*?)\*\*/g);
-    if (parts.length > 1) {
-      return (
-        <>
-          {parts.map((p, i) =>
-            i % 2 === 1 ? <strong key={i}>{p}</strong> : formatInlineCode(p, i)
-          )}
-        </>
-      );
-    }
-    return formatInlineCode(s, 0);
-  };
-
-  const formatInlineCode = (s: string, baseKey: number): JSX.Element | string => {
-    const parts = s.split(/`([^`]+)`/g);
-    if (parts.length > 1) {
-      return (
-        <>
-          {parts.map((p, i) =>
-            i % 2 === 1 ? <code key={`${baseKey}-${i}`}>{p}</code> : p
-          )}
-        </>
-      );
-    }
-    return s;
-  };
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-
-    // Code blocks
-    if (line.startsWith('```')) {
-      if (inCodeBlock) {
-        elements.push(
-          <pre key={`code-${i}`}>
-            <code>{codeLines.join('\n')}</code>
-          </pre>
-        );
-        codeLines = [];
-        inCodeBlock = false;
-      } else {
-        flushList();
-        inCodeBlock = true;
-      }
-      continue;
-    }
-
-    if (inCodeBlock) {
-      codeLines.push(line);
-      continue;
-    }
-
-    // Headers
-    const headerMatch = line.match(/^(#{1,3})\s+(.+)/);
-    if (headerMatch) {
-      flushList();
-      const level = headerMatch[1].length;
-      const Tag = `h${level}` as keyof JSX.IntrinsicElements;
-      elements.push(<Tag key={`h-${i}`}>{inlineFormat(headerMatch[2])}</Tag>);
-      continue;
-    }
-
-    // Unordered list
-    if (/^[-*]\s+/.test(line)) {
-      if (listItems.length > 0 && listItems[0].ordered) flushList();
-      listItems.push({ text: line.replace(/^[-*]\s+/, ''), ordered: false, idx: i });
-      continue;
-    }
-
-    // Ordered list
-    if (/^\d+\.\s+/.test(line)) {
-      if (listItems.length > 0 && !listItems[0].ordered) flushList();
-      listItems.push({ text: line.replace(/^\d+\.\s+/, ''), ordered: true, idx: i });
-      continue;
-    }
-
-    flushList();
-
-    // Empty line
-    if (line.trim() === '') continue;
-
-    // Regular paragraph
-    elements.push(<p key={`p-${i}`}>{inlineFormat(line)}</p>);
-  }
-
-  flushList();
-
-  return elements;
 }
 
 export default function ChatBox({ filterContext, onAgentSQL }: Props) {
@@ -188,7 +76,7 @@ export default function ChatBox({ filterContext, onAgentSQL }: Props) {
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
             <p style={{ fontSize: 14, marginBottom: 8 }}>Ask me about your audience</p>
-            <p style={{ fontSize: 12 }}>Try: "How many Kmart customers in NSW are aged 25-40?"</p>
+            <p style={{ fontSize: 12 }}>Try: "How many customers in NSW with abandoned carts over $100?"</p>
           </div>
         )}
 
@@ -196,7 +84,7 @@ export default function ChatBox({ filterContext, onAgentSQL }: Props) {
           <div key={i} className={`chat-msg ${msg.role}`}>
             {msg.role === 'assistant' ? (
               <>
-                {formatContent(msg.content)}
+                {formatMarkdown(msg.content)}
                 {msg.sql && (
                   <>
                     <div className="sql-toggle" onClick={() => toggleSQL(i)}>

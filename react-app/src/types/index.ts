@@ -6,6 +6,7 @@ export interface Filters {
   hasPhone: boolean;
   minSpend: number;
   recencyDays: number;
+  abandonedCart: boolean;
 }
 
 export interface Campaign {
@@ -42,7 +43,7 @@ export interface BreakdownRow {
 export interface Offer {
   id: string;
   name: string;
-  type: 'Points Multiplier' | 'Discount' | 'Cashback' | 'Partner' | 'Reward';
+  type: 'Promo' | 'Discount' | 'Cashback' | 'Partner' | 'Reward';
   description: string;
   costPerRedemption: number;
   avgRedemptionRate: number;

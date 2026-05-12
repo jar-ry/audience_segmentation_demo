@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import type { Campaign, Offer } from '../types';
 import { aiComplete } from '../hooks/api';
+import { formatMarkdown } from './FormatMarkdown';
 
 interface Props {
   audienceSize: number;
@@ -9,20 +10,20 @@ interface Props {
 }
 
 const SEED_OFFERS: Offer[] = [
-  { id: 'off-1', name: '3x OnePass Points', type: 'Points Multiplier', description: 'Triple points on all purchases for 30 days', costPerRedemption: 2.50, avgRedemptionRate: 0.35, active: true },
-  { id: 'off-2', name: '20% Off Apparel', type: 'Discount', description: '20% discount on all Kmart apparel', costPerRedemption: 8.00, avgRedemptionRate: 0.22, active: true },
-  { id: 'off-3', name: '$10 Cashback on $50+', type: 'Cashback', description: '$10 cashback when spending $50 or more', costPerRedemption: 10.00, avgRedemptionRate: 0.18, active: true },
-  { id: 'off-4', name: 'Flybuys Bonus 500pts', type: 'Partner', description: 'Bonus 500 Flybuys points with OnePass', costPerRedemption: 3.50, avgRedemptionRate: 0.28, partner: 'Flybuys', active: true },
-  { id: 'off-5', name: 'Free Click & Collect', type: 'Reward', description: 'Free express click & collect for 60 days', costPerRedemption: 4.00, avgRedemptionRate: 0.40, active: true },
-  { id: 'off-6', name: '15% Off Garden', type: 'Discount', description: '15% off all Bunnings garden products', costPerRedemption: 12.00, avgRedemptionRate: 0.15, active: true },
+  { id: 'off-1', name: '20% Off Stationery', type: 'Discount', description: '20% off all pens, notebooks & filing supplies', costPerRedemption: 4.00, avgRedemptionRate: 0.32, active: true },
+  { id: 'off-2', name: '$15 Off Tech $100+', type: 'Discount', description: '$15 off technology purchases over $100', costPerRedemption: 15.00, avgRedemptionRate: 0.18, active: true },
+  { id: 'off-3', name: 'Free Printing Credit $10', type: 'Promo', description: '$10 free print & copy credit', costPerRedemption: 10.00, avgRedemptionRate: 0.25, active: true },
+  { id: 'off-4', name: '$10 Cashback on $50+', type: 'Cashback', description: '$10 cashback when spending $50 or more', costPerRedemption: 10.00, avgRedemptionRate: 0.20, active: true },
+  { id: 'off-5', name: 'Free Same-Day Delivery', type: 'Reward', description: 'Free same-day metro delivery for 30 days', costPerRedemption: 6.00, avgRedemptionRate: 0.38, active: true },
+  { id: 'off-6', name: 'Abandoned Cart 10% Off', type: 'Promo', description: '10% off items left in cart (cart recovery)', costPerRedemption: 7.50, avgRedemptionRate: 0.42, active: true },
   { id: 'off-7', name: '$5 Off Next Visit', type: 'Cashback', description: '$5 off next purchase, no minimum', costPerRedemption: 5.00, avgRedemptionRate: 0.45, active: true },
-  { id: 'off-8', name: 'Uber Eats $10 Voucher', type: 'Partner', description: '$10 Uber Eats voucher with $100+ spend', costPerRedemption: 10.00, avgRedemptionRate: 0.12, partner: 'Uber Eats', active: false },
+  { id: 'off-8', name: 'DoorDash $10 Voucher', type: 'Partner', description: '$10 DoorDash voucher with $100+ spend', costPerRedemption: 10.00, avgRedemptionRate: 0.12, partner: 'DoorDash', active: false },
 ];
 
 const CHANNEL_COSTS = { Email: 0.03, SMS: 0.08, 'Email + SMS': 0.11 };
 
 const BADGE_CLASS: Record<string, string> = {
-  'Points Multiplier': 'badge-points',
+  Promo: 'badge-promo',
   Discount: 'badge-discount',
   Cashback: 'badge-cashback',
   Partner: 'badge-partner',
@@ -399,11 +400,7 @@ Do NOT recalculate any costs. Use exact numbers provided.`;
                   </div>
                 ) : (
                   <div className="insight-summary">
-                    <ul>
-                      {calcAiText.split('\n').map((l) => l.replace(/^[-*]\s*/, '').trim()).filter((l) => l.length > 0).map((line, i) => (
-                        <li key={i}>{line}</li>
-                      ))}
-                    </ul>
+                    {formatMarkdown(calcAiText)}
                   </div>
                 )}
               </div>
@@ -423,14 +420,14 @@ Do NOT recalculate any costs. Use exact numbers provided.`;
               <input
                 type="range"
                 min={1000}
-                max={100000}
-                step={1000}
+                max={1000000}
+                step={5000}
                 value={budget}
                 onChange={(e) => setBudget(Number(e.target.value))}
               />
               <div className="range-values">
                 <span>$1,000</span>
-                <span>$100,000</span>
+                <span>$1,000,000</span>
               </div>
             </div>
 
@@ -549,11 +546,7 @@ Do NOT recalculate any costs. Use exact numbers provided.`;
                   }
                   return (
                     <div className="insight-summary">
-                      <ul>
-                        {plannerAiText.split('\n').map((l) => l.replace(/^[-*]\s*/, '').trim()).filter((l) => l.length > 0).map((line, i) => (
-                          <li key={i}>{line}</li>
-                        ))}
-                      </ul>
+                      {formatMarkdown(plannerAiText)}
                     </div>
                   );
                 })()}

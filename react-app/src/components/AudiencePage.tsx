@@ -55,7 +55,6 @@ export default function AudiencePage({
 
 function buildFilterContext(filters: Filters, allStates: string[]): string {
   const parts: string[] = [];
-  parts.push(`Retailer=${filters.retailer}`);
   parts.push(`Age=${filters.ageRange[0]}-${filters.ageRange[1]}`);
   if (filters.states.length > 0 && filters.states.length < allStates.length) {
     parts.push(`States=${filters.states.join(',')}`);
@@ -64,5 +63,6 @@ function buildFilterContext(filters: Filters, allStates: string[]): string {
   if (filters.hasPhone) parts.push('HasPhone=true');
   if (filters.minSpend > 0) parts.push(`MinSpend=$${filters.minSpend}`);
   if (filters.recencyDays < 730) parts.push(`Recency=${filters.recencyDays}days`);
+  if (filters.abandonedCart) parts.push('AbandonedCart=true');
   return parts.join('; ');
 }

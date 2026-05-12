@@ -1,4 +1,4 @@
-/* ── OnePass Audience Segmentation — Design System ── */
+/* ── Officeworks Audience Segmentation — Design System ── */
 
 :root {
   --bg: #f5f6f8;
@@ -8,10 +8,10 @@
   --text: #1a1d23;
   --text-dim: #5c6370;
   --text-muted: #9199a5;
-  --accent: #7C3AED;
-  --accent-hover: #6D28D9;
-  --accent-light: #ede9fe;
-  --nav-bg: #7C3AED;
+  --accent: #CC0000;
+  --accent-hover: #A30000;
+  --accent-light: #fef2f2;
+  --nav-bg: #1a1d23;
   --nav-width: 220px;
   --radius: 12px;
   --radius-sm: 8px;
@@ -176,7 +176,7 @@ body {
   font-size: 16px;
 }
 
-.metric-icon.purple { background: var(--accent-light); color: var(--accent); }
+.metric-icon.red { background: var(--accent-light); color: var(--accent); }
 .metric-icon.pink { background: #fce7f3; color: #db2777; }
 .metric-icon.green { background: #d1fae5; color: #059669; }
 
@@ -449,20 +449,20 @@ input[type="range"]::-webkit-slider-thumb {
 .chat-container {
   display: flex;
   flex-direction: column;
-  height: 100%;
   background: var(--surface);
   border-radius: var(--radius);
   border: 1px solid var(--border);
   overflow: hidden;
+  min-height: 200px;
 }
 
 .chat-messages {
-  flex: 1;
   overflow-y: auto;
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  max-height: 60vh;
 }
 
 .chat-msg {
@@ -641,26 +641,53 @@ input[type="range"]::-webkit-slider-thumb {
   color: var(--text);
 }
 
-.insight-summary ul {
-  list-style: none;
+.insight-summary p {
+  margin: 6px 0;
+}
+
+.insight-summary h1, .insight-summary h2, .insight-summary h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 12px 0 6px;
+  color: var(--text);
+}
+
+.insight-summary ul, .insight-summary ol {
+  margin: 6px 0 6px 20px;
   padding: 0;
 }
 
 .insight-summary li {
-  padding: 4px 0;
-  padding-left: 16px;
-  position: relative;
+  margin: 4px 0;
+  padding-left: 4px;
 }
 
-.insight-summary li::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 11px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
+.insight-summary strong {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.insight-summary code {
+  background: rgba(0,0,0,0.06);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+.insight-summary pre {
+  background: #1e1e2e;
+  color: #cdd6f4;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  font-size: 12px;
+  margin: 8px 0;
+}
+
+.insight-summary pre code {
+  background: none;
+  padding: 0;
+  color: inherit;
 }
 
 /* ── Shimmer Loading ── */
@@ -681,7 +708,7 @@ input[type="range"]::-webkit-slider-thumb {
   display: grid;
   grid-template-columns: 1fr 360px;
   gap: 20px;
-  height: calc(100vh - 130px);
+  align-items: start;
 }
 
 .audience-layout.no-panel {
@@ -738,7 +765,7 @@ input[type="range"]::-webkit-slider-thumb {
   letter-spacing: 0.3px;
 }
 
-.badge-points { background: #ede9fe; color: #7c3aed; }
+.badge-promo { background: #fef2f2; color: #cc0000; }
 .badge-discount { background: #dbeafe; color: #2563eb; }
 .badge-cashback { background: #d1fae5; color: #059669; }
 .badge-partner { background: #fef3c7; color: #d97706; }
@@ -792,7 +819,7 @@ input[type="range"]::-webkit-slider-thumb {
 .status-Active { background: #d1fae5; color: #059669; }
 .status-Paused { background: #fef3c7; color: #d97706; }
 .status-Completed { background: #f3f4f6; color: #6b7280; }
-.status-Draft { background: #ede9fe; color: #7c3aed; }
+.status-Draft { background: #fef2f2; color: #cc0000; }
 .status-Activated { background: #dbeafe; color: #0284c7; }
 .status-Cancelled { background: #fef2f2; color: #dc2626; }
 

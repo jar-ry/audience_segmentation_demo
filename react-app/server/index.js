@@ -58,7 +58,7 @@ function getConnection() {
           authenticator: 'OAUTH',
           token,
           warehouse: process.env.SNOWFLAKE_WAREHOUSE || 'COMPUTE_WH',
-          database: 'ONEDATA_AUDIENCE',
+          database: 'OFFICEWORKS_AUDIENCE',
           schema: 'PUBLIC',
         }
       : {
@@ -66,7 +66,7 @@ function getConnection() {
           username: process.env.SNOWFLAKE_USER,
           password: process.env.SNOWFLAKE_PASSWORD,
           warehouse: process.env.SNOWFLAKE_WAREHOUSE || 'COMPUTE_WH',
-          database: 'ONEDATA_AUDIENCE',
+          database: 'OFFICEWORKS_AUDIENCE',
           schema: 'PUBLIC',
           role: process.env.SNOWFLAKE_ROLE || 'ACCOUNTADMIN',
         };
@@ -195,7 +195,7 @@ function callAgentAPI(query, _retry = 0) {
     const options = {
       hostname: host,
       port: 443,
-      path: '/api/v2/databases/ONEDATA_AUDIENCE/schemas/PUBLIC/agents/AUDIENCE_AGENT:run',
+      path: '/api/v2/databases/OFFICEWORKS_AUDIENCE/schemas/PUBLIC/agents/AUDIENCE_AGENT:run',
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

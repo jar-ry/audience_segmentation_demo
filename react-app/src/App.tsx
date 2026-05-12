@@ -12,42 +12,42 @@ const ALL_STATES = ['ACT', 'NSW', 'NT', 'QLD', 'SA', 'TAS', 'VIC', 'WA'];
 
 const SEED_CAMPAIGNS: Campaign[] = [
   {
-    id: 'camp-001', name: 'Summer DIY Blitz', status: 'Active', channel: 'Email',
-    audience: 'Bunnings VIC/NSW DIY Enthusiasts', audienceSize: 18500,
+    id: 'camp-001', name: 'Back to School Blitz', status: 'Active', channel: 'Email',
+    audience: 'Parents VIC/NSW Age 30-50', audienceSize: 18500,
     sent: 18500, opened: 7200, clicked: 2800, converted: 420,
     startDate: '2026-01-15', endDate: '2026-03-15', budget: 25000, spent: 18200,
     destination: 'Braze',
   },
   {
-    id: 'camp-002', name: 'Back to School Essentials', status: 'Completed', channel: 'Email + SMS',
-    audience: 'Kmart Parents 30-50 NSW', audienceSize: 22000,
+    id: 'camp-002', name: 'Abandoned Cart Recovery', status: 'Active', channel: 'Email + SMS',
+    audience: 'Abandoned Cart $50+ NSW/VIC', audienceSize: 8200,
+    sent: 8200, opened: 4100, clicked: 2300, converted: 680,
+    startDate: '2026-02-01', endDate: '2026-04-01', budget: 12000, spent: 7800,
+    destination: 'Braze',
+  },
+  {
+    id: 'camp-003', name: 'Tech Tuesday Promo', status: 'Completed', channel: 'Email',
+    audience: 'Tech Buyers 25-45 All States', audienceSize: 22000,
     sent: 22000, opened: 9800, clicked: 4100, converted: 890,
     startDate: '2026-01-05', endDate: '2026-02-10', budget: 15000, spent: 14800,
     destination: 'Hightouch',
   },
   {
-    id: 'camp-003', name: 'Garden Makeover Spring', status: 'Paused', channel: 'SMS',
-    audience: 'Bunnings Garden Shoppers QLD/WA', audienceSize: 12000,
+    id: 'camp-004', name: 'Print & Copy Win-back', status: 'Paused', channel: 'SMS',
+    audience: 'Lapsed Print Customers QLD/WA', audienceSize: 12000,
     sent: 8000, opened: 3500, clicked: 1200, converted: 280,
     startDate: '2026-02-01', endDate: '2026-04-01', budget: 20000, spent: 9500,
     destination: 'Braze',
   },
   {
-    id: 'camp-004', name: 'OnePass Welcome Offer', status: 'Active', channel: 'Email',
-    audience: 'New signups last 30 days', audienceSize: 5200,
-    sent: 5200, opened: 2600, clicked: 1100, converted: 310,
-    startDate: '2026-03-01', endDate: '2026-06-01', budget: 8000, spent: 3200,
-    destination: 'Braze',
-  },
-  {
-    id: 'camp-005', name: 'Winter Wardrobe Clearance', status: 'Draft', channel: 'Email',
-    audience: 'Kmart Apparel Buyers Female 25-45', audienceSize: 31000,
+    id: 'camp-005', name: 'EOFY Clearance Push', status: 'Draft', channel: 'Email',
+    audience: 'High Spenders $200+ All States', audienceSize: 31000,
     sent: 0, opened: 0, clicked: 0, converted: 0,
-    startDate: '2026-04-01', endDate: '2026-05-15', budget: 30000, spent: 0,
+    startDate: '2026-04-01', endDate: '2026-06-30', budget: 30000, spent: 0,
   },
   {
-    id: 'camp-006', name: 'Trade Pro Loyalty Boost', status: 'Activated', channel: 'SMS',
-    audience: 'Bunnings High Spenders $500+', audienceSize: 8900,
+    id: 'camp-006', name: 'Business Rewards Upsell', status: 'Activated', channel: 'Email + SMS',
+    audience: 'Business Customers $500+', audienceSize: 8900,
     sent: 0, opened: 0, clicked: 0, converted: 0,
     startDate: '2026-03-20', endDate: '2026-05-20', budget: 12000, spent: 0,
     destination: 'Hightouch',
@@ -62,6 +62,7 @@ const DEFAULT_FILTERS: Filters = {
   hasPhone: false,
   minSpend: 0,
   recencyDays: 730,
+  abandonedCart: false,
 };
 
 export default function App() {
@@ -71,7 +72,6 @@ export default function App() {
   const [syncedFromAgent, setSyncedFromAgent] = useState(false);
   const [campaigns, setCampaigns] = useState<Campaign[]>(SEED_CAMPAIGNS);
 
-  // Audience metrics
   const [audienceSize, setAudienceSize] = useState(0);
   const [totalBase, setTotalBase] = useState(200000);
   const [reachable, setReachable] = useState(0);
@@ -87,19 +87,16 @@ export default function App() {
     setLoading(true);
     setError('');
     try {
-      // Count audience
       const { fullQuery } = buildWhereClause(f, ALL_STATES);
       const countRows = await runSQL(fullQuery);
       const cnt = Number(countRows?.[0]?.CNT ?? countRows?.[0]?.cnt ?? 0);
       setAudienceSize(cnt);
 
-      // Reachable (has email or phone)
       const reachableQ = f.hasEmail || f.hasPhone
         ? cnt
-        : Math.round(cnt * 0.92); // ~92% have at least one channel
+        : Math.round(cnt * 0.92);
       setReachable(reachableQ);
 
-      // State breakdown
       const stateQ = buildBreakdownQuery(f, ALL_STATES, 'STATE_CODE');
       const stateRows = await runSQL(stateQ);
       setStateData(
@@ -109,7 +106,6 @@ export default function App() {
         }))
       );
 
-      // Age breakdown
       const ageQ = buildBreakdownQuery(f, ALL_STATES, 'AGE');
       const ageRows = await runSQL(ageQ);
       setAgeData(
@@ -119,14 +115,13 @@ export default function App() {
         }))
       );
 
-      // AI summary
       if (cnt > 0) {
-        const summaryPrompt = `You are an audience analytics assistant. Given this audience segment:
+        const summaryPrompt = `You are an audience analytics assistant for Officeworks (Australian office supplies & tech retailer). Given this audience segment:
 - Size: ${cnt.toLocaleString()} customers
-- Filters: Retailer=${f.retailer}, Age=${f.ageRange[0]}-${f.ageRange[1]}, States=${f.states.length > 0 ? f.states.join(',') : 'All'}, Email=${f.hasEmail}, Phone=${f.hasPhone}, Min Spend=$${f.minSpend}, Recency=${f.recencyDays} days
+- Filters: Age=${f.ageRange[0]}-${f.ageRange[1]}, States=${f.states.length > 0 ? f.states.join(',') : 'All'}, Email=${f.hasEmail}, Phone=${f.hasPhone}, Min Spend=$${f.minSpend}, Recency=${f.recencyDays} days, Abandoned Cart=${f.abandonedCart}
 - State distribution: ${stateRows.slice(0, 5).map((r: Record<string, unknown>) => `${r.LABEL ?? r.label}:${r.COUNT ?? r.count}`).join(', ')}
 
-Provide 3-4 concise bullet points with actionable insights for a campaign manager. Focus on segment characteristics, targeting opportunities, and potential campaign strategies. Keep each bullet to 1-2 sentences.`;
+Provide 3-4 concise bullet points with actionable insights for a campaign manager. Focus on segment characteristics, targeting opportunities (e.g. abandoned cart recovery, tech buyers, back-to-school), and potential campaign strategies. Keep each bullet to 1-2 sentences.`;
         try {
           const summary = await aiComplete(summaryPrompt);
           setExecSummary(summary);
@@ -144,16 +139,14 @@ Provide 3-4 concise bullet points with actionable insights for a campaign manage
     }
   }, []);
 
-  // Debounced refresh on filter change
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => refreshData(filters), 300);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [filters, refreshData]);
 
-  // Initial total base count
   useEffect(() => {
-    runSQL('SELECT COUNT(*) AS cnt FROM ONEDATA_AUDIENCE.PUBLIC.CUSTOMERS')
+    runSQL('SELECT COUNT(*) AS cnt FROM OFFICEWORKS_AUDIENCE.PUBLIC.CUSTOMERS')
       .then((rows) => setTotalBase(Number(rows?.[0]?.CNT ?? rows?.[0]?.cnt ?? 200000)))
       .catch(() => {});
   }, []);
@@ -173,7 +166,6 @@ Provide 3-4 concise bullet points with actionable insights for a campaign manage
 
   const buildAudienceLabel = useCallback((f: Filters): string => {
     const parts: string[] = [];
-    if (f.retailer !== 'All') parts.push(f.retailer);
     if (f.ageRange[0] > 1 || f.ageRange[1] < 100) parts.push(`Age ${f.ageRange[0]}-${f.ageRange[1]}`);
     if (f.states.length > 0 && f.states.length <= 3) parts.push(f.states.join('/'));
     if (f.states.length > 3) parts.push(`${f.states.length} states`);
@@ -181,6 +173,7 @@ Provide 3-4 concise bullet points with actionable insights for a campaign manage
     if (f.hasPhone) parts.push('Phone');
     if (f.minSpend > 0) parts.push(`$${f.minSpend}+ spend`);
     if (f.recencyDays < 730) parts.push(`${f.recencyDays}d recency`);
+    if (f.abandonedCart) parts.push('Abandoned Cart');
     return parts.length > 0 ? parts.join(' | ') : 'All Customers';
   }, []);
 
@@ -196,7 +189,7 @@ Provide 3-4 concise bullet points with actionable insights for a campaign manage
 
       <div className={`main-content${showFilters ? ' with-sidebar' : ''}`}>
         {error && (
-          <div style={{ background: '#ff4d4f', color: '#fff', padding: '8px 16px', fontSize: 13 }}>
+          <div style={{ background: '#CC0000', color: '#fff', padding: '8px 16px', fontSize: 13 }}>
             Error: {error}
           </div>
         )}

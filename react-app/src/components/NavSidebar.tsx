@@ -7,7 +7,7 @@ export default function NavSidebar({ page, onNavigate }: Props) {
   return (
     <nav className="nav-sidebar">
       <div className="nav-brand">
-        <h1>OnePass</h1>
+        <img src="/ow_logo.png" alt="Officeworks" style={{ height: 32, marginBottom: 8 }} />
         <p>Audience Platform</p>
       </div>
 
