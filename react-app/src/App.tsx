@@ -79,11 +79,13 @@ export default function App() {
   const [ageData, setAgeData] = useState<BreakdownRow[]>([]);
   const [execSummary, setExecSummary] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refreshData = useCallback(async (f: Filters) => {
     setLoading(true);
+    setError('');
     try {
       // Count audience
       const { fullQuery } = buildWhereClause(f, ALL_STATES);
@@ -136,6 +138,7 @@ Provide 3-4 concise bullet points with actionable insights for a campaign manage
       }
     } catch (err) {
       console.error('refreshData error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to refresh data');
     } finally {
       setLoading(false);
     }
@@ -192,6 +195,11 @@ Provide 3-4 concise bullet points with actionable insights for a campaign manage
       <NavSidebar page={page} onNavigate={setPage} />
 
       <div className={`main-content${showFilters ? ' with-sidebar' : ''}`}>
+        {error && (
+          <div style={{ background: '#ff4d4f', color: '#fff', padding: '8px 16px', fontSize: 13 }}>
+            Error: {error}
+          </div>
+        )}
         <MetricsBar
           audienceSize={audienceSize}
           pctOfBase={pctOfBase}

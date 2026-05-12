@@ -342,9 +342,12 @@ function parseAgentResponse(responseContent) {
 app.post('/api/sql', async (req, res) => {
   try {
     const { sql } = req.body;
+    console.log('[SQL] Executing:', sql.slice(0, 300));
     const rows = await executeSQL(sql);
+    console.log('[SQL] Result:', rows.length, 'rows', rows.length > 0 ? JSON.stringify(rows[0]).slice(0, 200) : '');
     res.json({ rows });
   } catch (e) {
+    console.error('[SQL] Error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
